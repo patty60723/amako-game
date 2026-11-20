@@ -1,0 +1,83 @@
+name: Update itch.io mobile preview
+
+on:
+  push:
+    branches: [web-preview]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: amako-itch-mobile-preview
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'patty60723/amako-game'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check one-time upload authorization
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          if [ -z "$BUTLER_API_KEY" ]; then
+            echo '::error::Setup required: add the itch.io butler credential as the BUTLER_API_KEY Actions secret. No game was uploaded.'
+            exit 1
+          fi
+      - name: Check out runtime files only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, resolved 2026-11-20
+        with:
+          persist-credentials: false
+      - name: Validate and stage the tested runtime
+        id: runtime
+        shell: python
+        run: |
+          import hashlib, json, os, pathlib, re, shutil, subprocess
+          root = pathlib.Path('.')
+          files = ['index.html','index.js','index.pck','index.wasm','index.png',
+                   'index.audio.worklet.js','index.audio.position.worklet.js',
+                   'OFL-NotoSansJP.txt','OFL-NotoSansTC.txt',
+                   'media/hero-umbrella-inventory-v01.png','media/reply-side-cg-v01.png',
+                   'media/NotoSansTC-Regular.ttf','version.json','robots.txt','.nojekyll']
+          allowed = set(files + ['.github/workflows/itch-preview.yml'])
+          tracked = set(subprocess.check_output(['git','ls-files','-z']).decode().rstrip('\0').split('\0'))
+          if tracked != allowed:
+              raise SystemExit('Runtime branch has unexpected or missing files; refusing upload')
+          version = json.loads(pathlib.Path('version.json').read_text(encoding='utf-8'))
+          if not re.fullmatch(r'v\d+', version['version']):
+              raise SystemExit('Invalid preview version')
+          digest = hashlib.file_digest(open('index.pck','rb'), 'sha256').hexdigest()
+          if digest != version['pck_sha256']:
+              raise SystemExit('Game pack differs from verified version')
+          for name in files:
+              source = root / name
+              if source.is_symlink() or not source.is_file() or source.stat().st_size > 200_000_000:
+                  raise SystemExit('Invalid runtime file: '+name)
+          if sum((root / name).stat().st_size for name in files) > 500_000_000:
+              raise SystemExit('HTML5 package too large')
+          for name in files:
+              target = pathlib.Path('_site') / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copyfile(root / name, target)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('version='+version['version']+'\n')
+          print('Verified runtime '+version['version']+' '+digest)
+      - name: Install checksum-pinned official itch.io uploader
+        run: |
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+            https://broth.itch.zone/butler/linux-amd64/15.32.0/archive/default -o "$RUNNER_TEMP/butler.zip"
+          echo '2335971394ef6596f95ded0833e85ee28755e13761716ef4c91d6b11f69162f5  '"$RUNNER_TEMP/butler.zip" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/butler"
+          unzip -q "$RUNNER_TEMP/butler.zip" -d "$RUNNER_TEMP/butler"
+          chmod +x "$RUNNER_TEMP/butler/butler"
+          "$RUNNER_TEMP/butler/butler" version
+      - name: Update the existing itch.io HTML5 channel
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+          PREVIEW_VERSION: ${{ steps.runtime.outputs.version }}
+        run: |
+          "$RUNNER_TEMP/butler/butler" push _site \
+            patty60723/amako-private-demo:html5 --userversion "$PREVIEW_VERSION"
+          echo 'Uploaded to the existing itch.io preview. On first channel upload, mark html5 as played in browser in Edit game.' >> "$GITHUB_STEP_SUMMARY"
