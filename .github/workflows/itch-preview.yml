@@ -41,6 +41,8 @@ jobs:
                    'OFL-NotoSansJP.txt','OFL-NotoSansTC.txt',
                    'media/hero-umbrella-inventory-v01.png','media/reply-side-cg-v01.png',
                    'media/NotoSansTC-Regular.ttf','version.json','robots.txt','.nojekyll']
+          if (root / 'media/title-scene-v01.png').is_file():
+              files.extend(['media/title-scene-v01.png','media/bag-watercolor-v01.png','media/settings-watercolor-v02.png'])
           allowed = set(files + ['.github/workflows/itch-preview.yml'])
           tracked = set(subprocess.check_output(['git','ls-files','-z']).decode().rstrip('\0').split('\0'))
           if tracked != allowed:
