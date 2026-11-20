@@ -48,7 +48,11 @@ jobs:
           version = json.loads(pathlib.Path('version.json').read_text(encoding='utf-8'))
           if not re.fullmatch(r'v\d+', version['version']):
               raise SystemExit('Invalid preview version')
-          digest = hashlib.file_digest(open('index.pck','rb'), 'sha256').hexdigest()
+          hasher = hashlib.sha256()
+          with open('index.pck','rb') as pack:
+              for block in iter(lambda: pack.read(1024 * 1024), b''):
+                  hasher.update(block)
+          digest = hasher.hexdigest()
           if digest != version['pck_sha256']:
               raise SystemExit('Game pack differs from verified version')
           for name in files:
