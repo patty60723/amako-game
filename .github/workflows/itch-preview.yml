@@ -43,6 +43,38 @@ jobs:
                    'media/NotoSansTC-Regular.ttf','version.json','robots.txt','.nojekyll']
           if (root / 'media/title-scene-v01.png').is_file():
               files.extend(['media/title-scene-v01.png','media/bag-watercolor-v01.png','media/settings-watercolor-v02.png'])
+          # Optional reviewed chapter candidates live beside the unchanged root.
+          candidate_names = {'index.html','index.js','index.pck','index.wasm','index.png',
+                             'index.audio.worklet.js','index.audio.position.worklet.js',
+                             'OFL.txt','OFL-NotoSansJP.txt','media/bag-watercolor-v01.png',
+                             'media/hero-umbrella-inventory-v01.png','media/NotoSansTC-Regular.ttf',
+                             'media/settings-watercolor-v02.png'}
+          for manifest_path in sorted(root.glob('candidate-ch03-v*/runtime-manifest.json')):
+              prefix = manifest_path.parent.name
+              if not re.fullmatch(r'candidate-ch03-v\d+', prefix) or manifest_path.parent.is_symlink():
+                  raise SystemExit('Invalid candidate directory')
+              candidate = json.loads(manifest_path.read_text(encoding='utf-8-sig'))
+              if set(candidate) != {'schema','status','build_tag','prefix','files'}:
+                  raise SystemExit('Unexpected candidate metadata')
+              if (candidate['schema'] != 'amako-runtime-candidate-v1' or candidate['status'] != 'Candidate'
+                      or candidate['prefix'] != prefix or prefix != 'candidate-ch03-'+candidate['build_tag']
+                      or not re.fullmatch(r'v\d+', candidate['build_tag'])):
+                  raise SystemExit('Candidate manifest identity mismatch')
+              rows = candidate['files']
+              if len(rows) != len(candidate_names) or {r.get('path') for r in rows} != candidate_names:
+                  raise SystemExit('Candidate runtime allowlist mismatch')
+              for row in rows:
+                  if set(row) != {'path','bytes','sha256'} or not re.fullmatch(r'[0-9a-f]{64}', str(row['sha256'])):
+                      raise SystemExit('Invalid candidate hash record')
+                  name = prefix+'/'+row['path']
+                  source = root/name
+                  if (source.is_symlink() or source.parent.is_symlink() or not source.is_file()
+                          or source.stat().st_size >= 104857600 or source.stat().st_size != row['bytes']):
+                      raise SystemExit('Invalid candidate runtime file: '+name)
+                  if hashlib.sha256(source.read_bytes()).hexdigest() != row['sha256']:
+                      raise SystemExit('Candidate hash mismatch: '+name)
+                  files.append(name)
+              files.append(prefix+'/runtime-manifest.json')
           allowed = set(files + ['.github/workflows/itch-preview.yml'])
           tracked = set(subprocess.check_output(['git','ls-files','-z']).decode().rstrip('\0').split('\0'))
           if tracked != allowed:
