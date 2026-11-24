@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   publish:
-    if: github.repository == 'patty60723/amako-game'
+    if: github.repository == 'patty60723/amako-game' && github.ref == 'refs/heads/web-preview'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -30,78 +30,205 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, resolved 2026-11-20
         with:
           persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
       - name: Validate and stage the tested runtime
         id: runtime
         shell: python
         run: |
-          import hashlib, json, os, pathlib, re, shutil, subprocess
-          root = pathlib.Path('.')
-          files = ['index.html','index.js','index.pck','index.wasm','index.png',
-                   'index.audio.worklet.js','index.audio.position.worklet.js',
-                   'OFL-NotoSansJP.txt','OFL-NotoSansTC.txt',
-                   'media/hero-umbrella-inventory-v01.png','media/reply-side-cg-v01.png',
-                   'media/NotoSansTC-Regular.ttf','version.json','robots.txt','.nojekyll']
-          if (root / 'media/title-scene-v01.png').is_file():
-              files.extend(['media/title-scene-v01.png','media/bag-watercolor-v01.png','media/settings-watercolor-v02.png'])
-          # Optional reviewed chapter candidates live beside the unchanged root.
-          candidate_names = {'index.html','index.js','index.pck','index.wasm','index.png',
-                             'index.audio.worklet.js','index.audio.position.worklet.js',
-                             'OFL.txt','OFL-NotoSansJP.txt','media/bag-watercolor-v01.png',
-                             'media/hero-umbrella-inventory-v01.png','media/NotoSansTC-Regular.ttf',
-                             'media/settings-watercolor-v02.png'}
-          for manifest_path in sorted(root.glob('candidate-ch03-v*/runtime-manifest.json')):
-              prefix = manifest_path.parent.name
-              if not re.fullmatch(r'candidate-ch03-v\d+', prefix) or manifest_path.parent.is_symlink():
-                  raise SystemExit('Invalid candidate directory')
-              candidate = json.loads(manifest_path.read_text(encoding='utf-8-sig'))
-              if set(candidate) != {'schema','status','build_tag','prefix','files'}:
-                  raise SystemExit('Unexpected candidate metadata')
-              if (candidate['schema'] != 'amako-runtime-candidate-v1' or candidate['status'] != 'Candidate'
-                      or candidate['prefix'] != prefix or prefix != 'candidate-ch03-'+candidate['build_tag']
-                      or not re.fullmatch(r'v\d+', candidate['build_tag'])):
-                  raise SystemExit('Candidate manifest identity mismatch')
-              rows = candidate['files']
-              if len(rows) != len(candidate_names) or {r.get('path') for r in rows} != candidate_names:
-                  raise SystemExit('Candidate runtime allowlist mismatch')
+          import hashlib, json, os, re, shutil, subprocess
+          from pathlib import Path
+          PINNED_BASELINE = "26f4a294c91e9f6b6d483a9bc3f8cb89b2029a1a"
+          WORKFLOW = ".github/workflows/itch-preview.yml"
+          DEPLOYMENT = "preview-deployment.json"
+          CORE = {"index.html", "index.js", "index.pck", "index.wasm", "index.png", "index.audio.worklet.js", "index.audio.position.worklet.js"}
+          MEDIA = {"media/bag-watercolor-v01.png", "media/hero-umbrella-inventory-v01.png", "media/NotoSansTC-Regular.ttf", "media/settings-watercolor-v02.png"}
+          OLD_RUNTIME = CORE | MEDIA | {"OFL.txt", "OFL-NotoSansJP.txt"}
+          REVIEW_RUNTIME = CORE | MEDIA | {"OFL-NotoSansTC.txt", "OFL-NotoSansJP.txt", "media/reply-side-cg-v01.png", "media/title-scene-v01.png"}
+          ROOT_RUNTIME = REVIEW_RUNTIME | {"version.json", "robots.txt", ".nojekyll"}
+          MAX_FILE = 104857600
+          MAX_TOTAL = 500000000
+          STANDALONE_PREFIX = "candidate-ch03-v364"
+
+          def fail(message):
+              raise ValueError(message)
+
+          def digest(data):
+              return hashlib.sha256(data).hexdigest()
+
+          def load_json(data):
+              return json.loads(data.decode("utf-8-sig"))
+
+          def reject_link(path):
+              info = path.lstat()
+              if path.is_symlink() or (getattr(info, "st_file_attributes", 0) & 0x400):
+                  fail("Symlink/reparse point forbidden: " + str(path))
+
+          def disk_paths(root):
+              reject_link(root)
+              files, directories = set(), set()
+              for folder, dirs, names in os.walk(root, followlinks=False):
+                  if Path(folder) == root and ".git" in dirs:
+                      dirs.remove(".git")
+                  for name in dirs:
+                      item = Path(folder) / name
+                      reject_link(item)
+                      directories.add(item.relative_to(root).as_posix())
+                  for name in names:
+                      item = Path(folder) / name
+                      reject_link(item)
+                      files.add(item.relative_to(root).as_posix())
+              return files, directories
+
+          def allowed_directories(files):
+              return {parent.as_posix() for name in files for parent in Path(name).parents if parent.as_posix() != "."}
+
+          def runtime_family(prefix):
+              if re.fullmatch(r"candidate-ch03-v[0-9]+", prefix):
+                  return OLD_RUNTIME, "candidate-ch03-"
+              if re.fullmatch(r"candidate-review-v[0-9]+", prefix):
+                  return REVIEW_RUNTIME, "candidate-review-"
+              fail("Invalid candidate prefix: " + prefix)
+
+          def validate_rows(rows, expected, read):
+              if not isinstance(rows, list) or len(rows) != len(expected):
+                  fail("Exact runtime file count mismatch")
+              seen = set()
               for row in rows:
-                  if set(row) != {'path','bytes','sha256'} or not re.fullmatch(r'[0-9a-f]{64}', str(row['sha256'])):
-                      raise SystemExit('Invalid candidate hash record')
-                  name = prefix+'/'+row['path']
-                  source = root/name
-                  if (source.is_symlink() or source.parent.is_symlink() or not source.is_file()
-                          or source.stat().st_size >= 104857600 or source.stat().st_size != row['bytes']):
-                      raise SystemExit('Invalid candidate runtime file: '+name)
-                  if hashlib.sha256(source.read_bytes()).hexdigest() != row['sha256']:
-                      raise SystemExit('Candidate hash mismatch: '+name)
-                  files.append(name)
-              files.append(prefix+'/runtime-manifest.json')
-          allowed = set(files + ['.github/workflows/itch-preview.yml'])
-          tracked = set(subprocess.check_output(['git','ls-files','-z']).decode().rstrip('\0').split('\0'))
-          if tracked != allowed:
-              raise SystemExit('Runtime branch has unexpected or missing files; refusing upload')
-          version = json.loads(pathlib.Path('version.json').read_text(encoding='utf-8'))
-          if not re.fullmatch(r'v\d+', version['version']):
-              raise SystemExit('Invalid preview version')
-          hasher = hashlib.sha256()
-          with open('index.pck','rb') as pack:
-              for block in iter(lambda: pack.read(1024 * 1024), b''):
-                  hasher.update(block)
-          digest = hasher.hexdigest()
-          if digest != version['pck_sha256']:
-              raise SystemExit('Game pack differs from verified version')
-          for name in files:
-              source = root / name
-              if source.is_symlink() or not source.is_file() or source.stat().st_size > 200_000_000:
-                  raise SystemExit('Invalid runtime file: '+name)
-          if sum((root / name).stat().st_size for name in files) > 500_000_000:
-              raise SystemExit('HTML5 package too large')
-          for name in files:
-              target = pathlib.Path('_site') / name
+                  if not isinstance(row, dict) or set(row) != {"path", "bytes", "sha256"}:
+                      fail("Unexpected runtime file metadata")
+                  name = row["path"]
+                  if not isinstance(name, str) or name not in expected or name in seen:
+                      fail("Unknown/duplicate/traversal runtime path")
+                  if type(row["bytes"]) is not int or not 0 <= row["bytes"] < MAX_FILE:
+                      fail("Invalid size or GitHub 100MiB per-file limit: " + name)
+                  if not isinstance(row["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"]):
+                      fail("Invalid runtime SHA-256")
+                  data = read(name)
+                  if len(data) != row["bytes"] or digest(data) != row["sha256"]:
+                      fail("Runtime hash/size mismatch: " + name)
+                  seen.add(name)
+              if seen != expected:
+                  fail("Runtime allowlist mismatch")
+
+          def validate_candidate(prefix, read):
+              expected, family = runtime_family(prefix)
+              manifest = load_json(read("runtime-manifest.json"))
+              if not isinstance(manifest, dict) or set(manifest) != {"schema", "status", "build_tag", "prefix", "files"}:
+                  fail("Unexpected candidate/editorial metadata")
+              if (manifest["schema"] != "amako-runtime-candidate-v1" or manifest["status"] != "Candidate"
+                      or not isinstance(manifest["build_tag"], str) or not re.fullmatch(r"v[0-9]+", manifest["build_tag"])
+                      or manifest["prefix"] != prefix or family + manifest["build_tag"] != prefix):
+                  fail("Candidate identity mismatch")
+              validate_rows(manifest["files"], expected, read)
+              return expected | {"runtime-manifest.json"}
+
+          def git(site, *args):
+              return subprocess.check_output(["git", "-C", str(site), *args])
+
+          def git_paths(site, view):
+              if view == "index":
+                  data = git(site, "ls-files", "-z")
+              else:
+                  data = git(site, "ls-tree", "-r", "--name-only", "-z", view)
+              return {name.decode("utf-8") for name in data.split(b"\0") if name}
+
+          def git_blob(site, view, name):
+              return git(site, "show", (":" if view == "index" else view + ":") + name)
+
+          def blob_id(site, view, name):
+              return git(site, "rev-parse", (":" if view == "index" else view + ":") + name).decode().strip()
+
+          def verify_baseline(site, view):
+              subprocess.run(["git", "-C", str(site), "merge-base", "--is-ancestor", PINNED_BASELINE, "HEAD"], check=True, capture_output=True)
+              protected = git_paths(site, PINNED_BASELINE) - {WORKFLOW}
+              if not ROOT_RUNTIME <= protected:
+                  fail("Pinned baseline lacks root runtime")
+              for name in protected:
+                  if name not in ROOT_RUNTIME:
+                      prefix = name.split("/", 1)[0]
+                      runtime_family(prefix)
+                  if blob_id(site, PINNED_BASELINE, name) != blob_id(site, view, name):
+                      fail("Pinned v099/old candidate blob changed: " + name)
+              return sorted(protected)
+
+          def validate_payload(root, tracked, read):
+              expected = set(ROOT_RUNTIME) | {WORKFLOW}
+              prefixes = {name.split("/", 1)[0] for name in tracked if name.startswith("candidate-")}
+              for prefix in sorted(prefixes):
+                  members = validate_candidate(prefix, lambda name: read(prefix + "/" + name))
+                  expected.update(prefix + "/" + name for name in members)
+              if any(prefix.startswith("candidate-review-") for prefix in prefixes):
+                  expected.add(DEPLOYMENT)
+              if tracked != expected:
+                  fail("Runtime Git tree has unexpected/missing files")
+              actual, directories = disk_paths(root)
+              if actual != expected or not directories <= allowed_directories(expected):
+                  fail("Worktree contains extra/missing runtime files or directories")
+              version = load_json(read("version.json"))
+              if not isinstance(version, dict) or version.get("version") != "v099" or version.get("pck_sha256") != digest(read("index.pck")):
+                  fail("Protected root version/PCK mismatch")
+              total = 0
+              for name in expected - {WORKFLOW}:
+                  length = len(read(name))
+                  if length >= MAX_FILE:
+                      fail("Tracked runtime exceeds GitHub 100MiB staging limit")
+                  total += length
+              result = {"files": sorted(expected - {WORKFLOW}), "candidates": sorted(prefixes), "root_files": len(ROOT_RUNTIME), "repo_total_bytes": total}
+              if DEPLOYMENT in expected:
+                  result.update(validate_deployment(read, expected, prefixes))
+              return result
+
+          def deployment_record(review_prefix, repo_files):
+              allowed, family = runtime_family(review_prefix)
+              if family != "candidate-review-" or allowed != REVIEW_RUNTIME:
+                  fail("Deployment review prefix must be the fifteen-file family")
+              included = set(ROOT_RUNTIME) | {DEPLOYMENT}
+              included.update(STANDALONE_PREFIX + "/" + name for name in OLD_RUNTIME | {"runtime-manifest.json"})
+              included.update(review_prefix + "/" + name for name in REVIEW_RUNTIME | {"runtime-manifest.json"})
+              return {"schema": "amako-runtime-deployment/v1", "review_prefix": review_prefix, "standalone_prefix": STANDALONE_PREFIX,
+                      "files": sorted(included), "omitted_from_latest_bundle": sorted(set(repo_files) - included - {WORKFLOW})}
+
+          def validate_deployment(read, repo_files, prefixes):
+              record = load_json(read(DEPLOYMENT))
+              if not isinstance(record, dict) or set(record) != {"schema", "review_prefix", "standalone_prefix", "files", "omitted_from_latest_bundle"}:
+                  fail("Unexpected deployment/source metadata")
+              if record["schema"] != "amako-runtime-deployment/v1" or record["standalone_prefix"] != STANDALONE_PREFIX:
+                  fail("Unknown deployment policy")
+              if not isinstance(record["review_prefix"], str) or record["review_prefix"] not in prefixes or STANDALONE_PREFIX not in prefixes:
+                  fail("Deployment prefix missing from verified archive")
+              expected = deployment_record(record["review_prefix"], repo_files)
+              if record != expected:
+                  fail("Exact deployment include/omit paths differ from policy")
+              files = record["files"]
+              total = sum(len(read(name)) for name in files)
+              if len(files) > 1000 or total > MAX_TOTAL or any(len(read(name)) > 200000000 for name in files):
+                  fail("Itch extracted package exceeds 500MB/1000 files/200MB per file")
+              return {"deployment_files": files, "omitted_from_latest_bundle": record["omitted_from_latest_bundle"], "deployment_bytes": total}
+          root = Path('.').absolute()
+          tracked = git_paths(root, 'index')
+          if DEPLOYMENT not in tracked:
+              fail('Explicit runtime deployment manifest required')
+          plan = validate_payload(root, tracked, lambda name: git_blob(root, 'index', name))
+          verify_baseline(root, 'index')
+          staged = root / '_site'
+          if staged.exists():
+              fail('Preserve existing staging directory')
+          staged.mkdir()
+          for name in plan['deployment_files']:
+              target = staged / name
               target.parent.mkdir(parents=True, exist_ok=True)
-              shutil.copyfile(root / name, target)
+              target.write_bytes(git_blob(root, 'index', name))
+          actual, directories = disk_paths(staged)
+          if actual != set(plan['deployment_files']) or not directories <= allowed_directories(actual):
+              fail('Staged deployment differs from explicit manifest')
+          for name in actual:
+              if digest((staged/name).read_bytes()) != digest(git_blob(root, 'index', name)):
+                  fail('Staged deployment bytes differ from validated index')
+          selection = load_json(git_blob(root, 'index', DEPLOYMENT))
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('version='+version['version']+'\n')
-          print('Verified runtime '+version['version']+' '+digest)
+              output.write('version='+selection['review_prefix'].removeprefix('candidate-review-')+'\n')
+          print(json.dumps({'root_runtime':'v099 unchanged','repo_archive_bytes':plan['repo_total_bytes'],'deployment_bytes':plan['deployment_bytes'],'omitted_from_latest_bundle':plan['omitted_from_latest_bundle']}))
       - name: Install checksum-pinned official itch.io uploader
         run: |
           curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
