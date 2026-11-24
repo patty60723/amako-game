@@ -39,6 +39,7 @@ jobs:
           import hashlib, json, os, re, shutil, subprocess
           from pathlib import Path
           PINNED_BASELINE = "26f4a294c91e9f6b6d483a9bc3f8cb89b2029a1a"
+          EXPECTED_PREVIOUS_RELEASE = "2efe6fc05659ce2c70fa99de5bf5803e8a14ce29"
           WORKFLOW = ".github/workflows/itch-preview.yml"
           DEPLOYMENT = "preview-deployment.json"
           CORE = {"index.html", "index.js", "index.pck", "index.wasm", "index.png", "index.audio.worklet.js", "index.audio.position.worklet.js"}
@@ -152,6 +153,30 @@ jobs:
                       fail("Pinned v099/old candidate blob changed: " + name)
               return sorted(protected)
 
+          def require_previous_release(value):
+              if not isinstance(value, str) or value != EXPECTED_PREVIOUS_RELEASE:
+                  fail("Explicit previous release must match the reviewed release pin")
+
+          def verify_release_delta(site, view, previous, prefix, allow_workflow_update=False):
+              require_previous_release(previous)
+              runtime, family = runtime_family(prefix)
+              if family != "candidate-review-":
+                  fail("Incremental release must add the fifteen-file review family")
+              old, current = git_paths(site, previous), git_paths(site, view)
+              if prefix in {name.split("/", 1)[0] for name in old}:
+                  fail("Candidate prefix already existed in the previous release")
+              additions = {prefix + "/" + name for name in runtime | {"runtime-manifest.json"}}
+              if DEPLOYMENT not in old:
+                  additions.add(DEPLOYMENT)
+              if current - old != additions or old - current:
+                  fail("Release must preserve history and add exactly one review prefix")
+              for name in old:
+                  if name == DEPLOYMENT or (name == WORKFLOW and allow_workflow_update):
+                      continue
+                  if blob_id(site, previous, name) != blob_id(site, view, name):
+                      fail("Previous release blob changed: " + name)
+              return sorted(old - {DEPLOYMENT, WORKFLOW})
+
           def validate_payload(root, tracked, read):
               expected = set(ROOT_RUNTIME) | {WORKFLOW}
               prefixes = {name.split("/", 1)[0] for name in tracked if name.startswith("candidate-")}
@@ -211,6 +236,11 @@ jobs:
               fail('Explicit runtime deployment manifest required')
           plan = validate_payload(root, tracked, lambda name: git_blob(root, 'index', name))
           verify_baseline(root, 'index')
+          parents = git(root, 'rev-list', '--parents', '-n', '1', 'HEAD').decode().split()
+          if len(parents) != 2 or parents[1] != EXPECTED_PREVIOUS_RELEASE:
+              fail('Release commit must have the exact reviewed previous release as its sole parent')
+          selection = load_json(git_blob(root, 'index', DEPLOYMENT))
+          verify_release_delta(root, 'index', EXPECTED_PREVIOUS_RELEASE, selection['review_prefix'], True)
           staged = root / '_site'
           if staged.exists():
               fail('Preserve existing staging directory')
