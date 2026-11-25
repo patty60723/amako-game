@@ -39,7 +39,7 @@ jobs:
           import hashlib, json, os, re, shutil, subprocess
           from pathlib import Path
           PINNED_BASELINE = "26f4a294c91e9f6b6d483a9bc3f8cb89b2029a1a"
-          EXPECTED_PREVIOUS_RELEASE = "780b0190fa131b28705f2b088b57ae6c0272233e"
+          EXPECTED_PREVIOUS_RELEASE = "d6920b308acf975612442125ed0138ae6406e858"
           MAIN_PROMOTION_PREVIOUS = "84842206ae686087a7989b1de37c42e07c59d016"
           MAIN_PROMOTION_PREFIX = "candidate-review-v665"
           LEGACY_ROOT_ENTRY_SHA256 = "34f3a7947acc9532ae42eec24af03b33cded9244147363a99646d35ca4582e77"

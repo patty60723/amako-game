@@ -1,0 +1,83 @@
+{
+    "schema":  "amako-runtime-candidate-v1",
+    "status":  "Candidate",
+    "build_tag":  "v690",
+    "prefix":  "candidate-review-v690",
+    "files":  [
+                  {
+                      "path":  "index.audio.position.worklet.js",
+                      "bytes":  2973,
+                      "sha256":  "be33985bc7160d6bf9646f259cd86b259cd67b02ccb297ee5c44f8ac84327bc8"
+                  },
+                  {
+                      "path":  "index.audio.worklet.js",
+                      "bytes":  7298,
+                      "sha256":  "5b476a9c9ce642c0ee4256436d1bc31d9c38f868aca0f9a8e2a57c18d2dec2a3"
+                  },
+                  {
+                      "path":  "index.html",
+                      "bytes":  8653,
+                      "sha256":  "09d62a4bd5a5ea9c6c411cb194aa6eaf8711c853132585d98c30a2101f68b320"
+                  },
+                  {
+                      "path":  "index.js",
+                      "bytes":  279815,
+                      "sha256":  "33c94cb3175f3333b82e2a3be5e8e86f77986f0aa2042b1631f6367a4e5bb6ba"
+                  },
+                  {
+                      "path":  "index.pck",
+                      "bytes":  102410304,
+                      "sha256":  "0fd8899ac2d4f1bb69c4086fc7d849182cfa328d77c0c8aef86519c62cf93011"
+                  },
+                  {
+                      "path":  "index.png",
+                      "bytes":  21443,
+                      "sha256":  "3cb4495c0b98dfbe4b663cbf2b6836473572339beb66d902367893162a70be0e"
+                  },
+                  {
+                      "path":  "index.wasm",
+                      "bytes":  39514754,
+                      "sha256":  "fc74679e3b97f76878947fcd4fbe1268cbfa6188182a2e33bbc3f5dc9bfa57d0"
+                  },
+                  {
+                      "path":  "OFL-NotoSansJP.txt",
+                      "bytes":  4388,
+                      "sha256":  "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9"
+                  },
+                  {
+                      "path":  "OFL-NotoSansTC.txt",
+                      "bytes":  4388,
+                      "sha256":  "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9"
+                  },
+                  {
+                      "path":  "media/bag-watercolor-v01.png",
+                      "bytes":  1365916,
+                      "sha256":  "b4957830e9e7458ce4b523c55262cfbce0f5bbdee9c131960a7d1f5df5d611eb"
+                  },
+                  {
+                      "path":  "media/hero-umbrella-inventory-v01.png",
+                      "bytes":  773400,
+                      "sha256":  "23b4f1a087548d158d62222e05143404713fde0ff593b0bcda268016e1cdfb53"
+                  },
+                  {
+                      "path":  "media/NotoSansTC-Regular.ttf",
+                      "bytes":  557568,
+                      "sha256":  "432e86bfbe3707d13f4456099e0f7b8c311b0be5a5be86da651c1b74e51efd6b"
+                  },
+                  {
+                      "path":  "media/reply-side-cg-v01.png",
+                      "bytes":  2541268,
+                      "sha256":  "75ec55f17e444fc2b66ec51c822af343ef2522d427d1433e7f259243b1992df4"
+                  },
+                  {
+                      "path":  "media/settings-watercolor-v02.png",
+                      "bytes":  1563172,
+                      "sha256":  "eda336a27db6e0031dcbc2da9d17b8572f1ac66efdbfc0585fdc7cc090b3f881"
+                  },
+                  {
+                      "path":  "media/title-scene-v01.png",
+                      "bytes":  2870881,
+                      "sha256":  "b53f2fee69df63d534916db7ce0fdf13b915363ab734c40573f9f7330491483d"
+                  }
+              ]
+}
