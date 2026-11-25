@@ -26,13 +26,14 @@ jobs:
           sparse-checkout: |
             candidate-ch03-v364
             candidate-review-v690
+            media
       - name: Validate exact old assets and navigation-only wrapper
         shell: python
         run: |
           from pathlib import Path
           import hashlib,json,shutil,subprocess
           sha=lambda b:hashlib.sha256(b).hexdigest()
-          assert subprocess.check_output(['git','rev-parse','HEAD^']).decode().strip()=='cf340a3aa1102b8216a4c5ac2f44a1cd3d6950a4'
+          assert subprocess.check_output(['git','rev-parse','HEAD^']).decode().strip()=='9a86acd18cee17f1b14f1720dec0d43889e83b2f'
           raw=Path('formal-restoration-v723.json').read_bytes()
           assert sha(raw)=='c13b31606cb39c50c6b16f75de917c0bea131e7fdb751fb2395ccfc327c7d36e'
           m=json.loads(raw);assert m['schema']=='amako.formal-restoration/v723' and m['build']=='v690' and len(m['files'])==49
