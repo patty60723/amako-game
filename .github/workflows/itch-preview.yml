@@ -39,7 +39,11 @@ jobs:
           import hashlib, json, os, re, shutil, subprocess
           from pathlib import Path
           PINNED_BASELINE = "26f4a294c91e9f6b6d483a9bc3f8cb89b2029a1a"
-          EXPECTED_PREVIOUS_RELEASE = "84d4c9ffdac88b1262daaa6d07325c2d30dbd2fa"
+          EXPECTED_PREVIOUS_RELEASE = "84842206ae686087a7989b1de37c42e07c59d016"
+          MAIN_PROMOTION_PREVIOUS = "84842206ae686087a7989b1de37c42e07c59d016"
+          MAIN_PROMOTION_PREFIX = "candidate-review-v665"
+          LEGACY_ROOT_ENTRY_SHA256 = "34f3a7947acc9532ae42eec24af03b33cded9244147363a99646d35ca4582e77"
+          MAIN_ENTRY_SHA256 = "f2fd62909cee62cbba4065da202750506fc83241d34ffd6bce14ee6165ca6283"
           WORKFLOW = ".github/workflows/itch-preview.yml"
           DEPLOYMENT = "preview-deployment.json"
           CORE = {"index.html", "index.js", "index.pck", "index.wasm", "index.png", "index.audio.worklet.js", "index.audio.position.worklet.js"}
@@ -146,6 +150,12 @@ jobs:
               if not ROOT_RUNTIME <= protected:
                   fail("Pinned baseline lacks root runtime")
               for name in protected:
+                  if name == "index.html":
+                      if digest(git_blob(site, PINNED_BASELINE, name)) != LEGACY_ROOT_ENTRY_SHA256:
+                          fail("Pinned legacy root entry differs")
+                      if digest(git_blob(site, view, name)) not in {LEGACY_ROOT_ENTRY_SHA256, MAIN_ENTRY_SHA256}:
+                          fail("Root entry is neither pinned legacy nor reviewed dispatcher")
+                      continue
                   if name not in ROOT_RUNTIME:
                       prefix = name.split("/", 1)[0]
                       runtime_family(prefix)
@@ -157,8 +167,28 @@ jobs:
               if not isinstance(value, str) or value != EXPECTED_PREVIOUS_RELEASE:
                   fail("Explicit previous release must match the reviewed release pin")
 
-          def verify_release_delta(site, view, previous, prefix, allow_workflow_update=False):
+          def verify_main_entry_transition(site, view, previous, prefix, promote_main_entry=False):
+              if not promote_main_entry:
+                  if blob_id(site, previous, "index.html") != blob_id(site, view, "index.html"):
+                      fail("Normal release cannot change or roll back the root entry")
+                  return
+              old = digest(git_blob(site, previous, "index.html"))
+              new = digest(git_blob(site, view, "index.html"))
+              if promote_main_entry:
+                  if (previous != MAIN_PROMOTION_PREVIOUS or prefix != MAIN_PROMOTION_PREFIX
+                          or old != LEGACY_ROOT_ENTRY_SHA256 or new != MAIN_ENTRY_SHA256):
+                      fail("Main entry promotion differs from exact reviewed previous/prefix/old/new pins")
+
+
+          def infer_main_entry_promotion(site, view, previous, prefix):
+              return (previous == MAIN_PROMOTION_PREVIOUS and prefix == MAIN_PROMOTION_PREFIX
+                      and digest(git_blob(site, previous, "index.html")) == LEGACY_ROOT_ENTRY_SHA256
+                      and digest(git_blob(site, view, "index.html")) == MAIN_ENTRY_SHA256)
+
+
+          def verify_release_delta(site, view, previous, prefix, allow_workflow_update=False, promote_main_entry=False):
               require_previous_release(previous)
+              verify_main_entry_transition(site, view, previous, prefix, promote_main_entry)
               runtime, family = runtime_family(prefix)
               if family != "candidate-review-":
                   fail("Incremental release must add the fifteen-file review family")
@@ -171,6 +201,8 @@ jobs:
               if current - old != additions or old - current:
                   fail("Release must preserve history and add exactly one review prefix")
               for name in old:
+                  if name == "index.html" and promote_main_entry:
+                      continue
                   if name == DEPLOYMENT or (name == WORKFLOW and allow_workflow_update):
                       continue
                   if blob_id(site, previous, name) != blob_id(site, view, name):
@@ -240,7 +272,8 @@ jobs:
           if len(parents) != 2 or parents[1] != EXPECTED_PREVIOUS_RELEASE:
               fail('Release commit must have the exact reviewed previous release as its sole parent')
           selection = load_json(git_blob(root, 'index', DEPLOYMENT))
-          verify_release_delta(root, 'index', EXPECTED_PREVIOUS_RELEASE, selection['review_prefix'], True)
+          promote_main_entry = infer_main_entry_promotion(root, 'index', EXPECTED_PREVIOUS_RELEASE, selection['review_prefix'])
+          verify_release_delta(root, 'index', EXPECTED_PREVIOUS_RELEASE, selection['review_prefix'], True, promote_main_entry)
           staged = root / '_site'
           if staged.exists():
               fail('Preserve existing staging directory')
@@ -258,7 +291,7 @@ jobs:
           selection = load_json(git_blob(root, 'index', DEPLOYMENT))
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('version='+selection['review_prefix'].removeprefix('candidate-review-')+'\n')
-          print(json.dumps({'root_runtime':'v099 unchanged','repo_archive_bytes':plan['repo_total_bytes'],'deployment_bytes':plan['deployment_bytes'],'omitted_from_latest_bundle':plan['omitted_from_latest_bundle']}))
+          print(json.dumps({'root_runtime':'legacy engine preserved; reviewed root entry policy','repo_archive_bytes':plan['repo_total_bytes'],'deployment_bytes':plan['deployment_bytes'],'omitted_from_latest_bundle':plan['omitted_from_latest_bundle']}))
       - name: Install checksum-pinned official itch.io uploader
         run: |
           curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
