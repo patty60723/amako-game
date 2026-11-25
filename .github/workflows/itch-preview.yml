@@ -39,7 +39,7 @@ jobs:
           import hashlib, json, os, re, shutil, subprocess
           from pathlib import Path
           PINNED_BASELINE = "26f4a294c91e9f6b6d483a9bc3f8cb89b2029a1a"
-          EXPECTED_PREVIOUS_RELEASE = "3943d5fc927a1540d6b104108dd1c03212de1ee5"
+          EXPECTED_PREVIOUS_RELEASE = "84d4c9ffdac88b1262daaa6d07325c2d30dbd2fa"
           WORKFLOW = ".github/workflows/itch-preview.yml"
           DEPLOYMENT = "preview-deployment.json"
           CORE = {"index.html", "index.js", "index.pck", "index.wasm", "index.png", "index.audio.worklet.js", "index.audio.position.worklet.js"}
